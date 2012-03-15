@@ -1,6 +1,7 @@
 from django import template
 from django.http import Http404
 from django.conf import settings
+from django.core.exceptions import FieldError
 
 register = template.Library()
 
@@ -17,17 +18,24 @@ sort_directions = {
 
 def anchor(parser, token):
     """
-    Parses a tag that's supposed to be in this format: {% anchor field title %}    
+    Parses a tag that's supposed to be in this format: {% anchor field title sortdir %}
     """
     bits = [b.strip('"\'') for b in token.split_contents()]
+
     if len(bits) < 2:
         raise TemplateSyntaxError, "anchor tag takes at least 1 argument"
-    try:
+
+    field = bits[1].strip()
+    title = field.capitalize()
+    sortdir = ''
+
+    if len(bits) >= 3:
         title = bits[2]
-    except IndexError:
-        title = bits[1].capitalize()
-    return SortAnchorNode(bits[1].strip(), title.strip())
-    
+
+    if len(bits) == 4:
+        sortdir = bits[3]
+
+    return SortAnchorNode(field, title, sortdir)
 
 class SortAnchorNode(template.Node):
     """
@@ -37,13 +45,14 @@ class SortAnchorNode(template.Node):
     currently being sorted on.
 
     Eg.
-        {% anchor name Name %} generates
-        <a href="/the/current/path/?sort=name" title="Name">Name</a>
+        {% anchor name Name asc %} generates
+        <a href="/the/current/path/?sort=name&dir=asc" title="Name">Name</a>
 
     """
-    def __init__(self, field, title):
+    def __init__(self, field, title, sortdir):
         self.field = field
         self.title = title
+        self.sortdir = sortdir
 
     def render(self, context):
         request = context['request']
@@ -53,20 +62,28 @@ class SortAnchorNode(template.Node):
             del getvars['sort']
         else:
             sortby = ''
+
         if 'dir' in getvars:
             sortdir = getvars['dir']
             del getvars['dir']
         else:
-            sortdir = ''
+            sortdir = self.sortdir
+
         if sortby == self.field:
             getvars['dir'] = sort_directions[sortdir]['inverse']
             icon = sort_directions[sortdir]['icon']
         else:
+            # If we're not on the current field, use the default sortdir
+            # rather than the order
+            if self.sortdir:
+                getvars['dir'] = self.sortdir
             icon = ''
+
         if len(getvars.keys()) > 0:
             urlappend = "&%s" % getvars.urlencode()
         else:
             urlappend = ''
+
         if icon:
             title = "%s %s" % (self.title, icon)
         else:
@@ -96,7 +113,20 @@ class SortedDataNode(template.Node):
         order_by = context['request'].field
         if len(order_by) > 1:
             try:
-                context[key] = value.order_by(order_by)
+                try:
+                    val = list(value.order_by(order_by))
+                    context[key] = val
+                except:
+                    ## Support for sorting on properties
+
+                    # Split off reverse sort
+                    reverse = False
+                    if order_by.startswith("-"):
+                        order_by = order_by[1:]
+                        reverse = True
+
+                    context[key] = sorted(value, key=lambda v: getattr(v, order_by), reverse=reverse)
+
             except template.TemplateSyntaxError:
                 if INVALID_FIELD_RAISES_404:
                     raise Http404('Invalid field sorting. If DEBUG were set to ' +

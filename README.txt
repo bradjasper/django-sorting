@@ -1,3 +1,13 @@
+Changes to this fork
+----------------------------
+
+{% autosort %} can sort on custom fields (properties) in addition to regular fields
+
+{% anchor %} can specify a default sort order as a third parameter.
+
+<th>{% anchor first_name Name asc %}</th>
+<th>{% anchor first_name Name desc %}</th>
+
 How to use django-sorting
 ----------------------------
 
